@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecteur Ambiance Automatique</title>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            color: #00f2fe;
+            margin-bottom: 20px;
+        }
+
+        .setup-container {
+            display: none; /* Masqué si le mode automatique s'active */
+            background: rgba(255, 255, 255, 0.05);
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn {
+            padding: 15px 35px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #4e54c8, #8f94fb);
+            transition: transform 0.2s;
+        }
+
+        .btn:hover { transform: scale(1.05); }
+
+        /* --- ZONE DIAPORAMA --- */
+        #diaporama-wrapper {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            z-index: 9999;
+        }
+
+        .swiper { width: 100%; height: 100%; }
+        .swiper-slide {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .swiper-slide img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            transition: transform 4s ease-out; /* Pour l'effet de zoom progressif */
+        }
+
+        /* Effet Ken Burns (zoom lent) quand la slide devient active */
+        .swiper-slide-active img {
+            transform: scale(1.08);
+        }
+
+        .btn-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 10005;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="setup-container" id="setup-screen">
+        <h1>Bienvenue</h1>
+        <p>Pour commencer, veuillez sélectionner le dossier contenant vos images.</p>
+        <p>Les prochaines fois, le diaporama et la musique se lanceront automatiquement.</p>
+        <br>
+        <button class="btn" onclick="choisirDossier()">📂 Sélectionner le Dossier</button>
+    </div>
+
+    <div id="diaporama-wrapper">
+        <button class="btn-close" onclick="quitterDiaporama()">✖ Quitter</button>
+        <div class="swiper">
+            <div class="swiper-wrapper" id="slides-container"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+
+    <script>
+        // --- CONFIGURATION ---
+        const LIEN_MUSIQUE = "https://www.youtube.com"; // Change par ton lien de musique (Playlist, Spotify, etc.)
+        const TEMPS_AFFICHAGE = 5000; // Temps d'affichage par image (5 secondes)
+
+        let db;
+        let dossierHandle = null;
+        let monSwiper = null;
+
+        // Base de données pour retenir le dossier
+        const request = indexedDB.open("AutoDiapoDB", 1);
+        request.onupgradeneeded = (e) => e.target.result.createObjectStore("handles");
+        request.onsuccess = (e) => {
+            db = e.target.result;
+            verifierDossierAuDemarrage();
+        };
+
+        // 1. DÉMARRAGE AUTOMATIQUE
+        async function verifierDossierAuDemarrage() {
+            const tx = db.transaction("handles", "readonly");
+            const store = tx.objectStore("handles");
+            const req = store.get("dossierImages");
+            
+            req.onsuccess = async () => {
+                if (req.result) {
+                    dossierHandle = req.result;
+                    // L'utilisateur doit juste accepter le pop-up de sécurité du navigateur
+                    const gestionPermissions = await dossierHandle.queryPermission({ mode: 'read' });
+                    
+                    if (gestionPermissions === 'granted') {
+                        demarrerTout();
+                    } else {
+                        // Si la permission a expiré (fermeture du navigateur), on lui demande un clic pour ré-autoriser
+                        document.getElementById('setup-screen').style.display = "block";
+                        document.getElementById('setup-screen').innerHTML = `
+                            <h1>Prêt à lancer</h1>
+                            <p>Cliquez ci-dessous pour autoriser l'accès et lancer l'ambiance.</p><br>
+                            <button class="btn" onclick="demanderPermissionEtLancer()">🚀 Autoriser & Lancer</button>
+                        `;
+                    }
+                } else {
+                    // Premier démarrage absolu : on montre l'écran de sélection
+                    document.getElementById('setup-screen').style.display = "block";
+                }
+            };
+        }
+
+        async function demanderPermissionEtLancer() {
+            if (await dossierHandle.requestPermission({ mode: 'read' }) === 'granted') {
+                demarrerTout();
+            }
+        }
+
+        // 2. PREMIER CHOIX DU DOSSIER
+        async function choisirDossier() {
+            try {
+                dossierHandle = await window.showDirectoryPicker();
+                const tx = db.transaction("handles", "readwrite");
+                tx.objectStore("handles").put(dossierHandle, "dossierImages");
+                demarrerTout();
+            } catch (err) {
+                console.log("Sélection annulée", err);
+            }
+        }
+
+        // 3. ACTION DE LANCEMENT (MUSIQUE + DIAPO)
+        async function demarrerTout() {
+            // Masque l'écran d'accueil
+            document.getElementById('setup-screen').style.display = "none";
+            
+            // A. Lance la musique en arrière-plan (ouvre un nouvel onglet)
+            window.open(LIEN_MUSIQUE, "_blank");
+
+            // B. Génère le diaporama
+            await chargerImagesLocales();
+            
+            // C. Affiche et passe en plein écran
+            const wrapper = document.getElementById('diaporama-wrapper');
+            wrapper.style.display = "block";
+            if (wrapper.requestFullscreen) wrapper.requestFullscreen();
+
+            initialiserSwiperAnime();
+        }
+
+        // 4. LECTURE DES IMAGES
+        async function chargerImagesLocales() {
+            const container = document.getElementById('slides-container');
+            container.innerHTML = "";
+
+            for await (const entry of dossierHandle.values()) {
+                if (entry.kind === 'file') {
+                    const file = await entry.getFile();
+                    if (file.type.startsWith('image/')) {
+                        const url = URL.createObjectURL(file);
+                        const slide = document.createElement('div');
+                        slide.className = 'swiper-slide';
+                        slide.innerHTML = `<img src="${url}" alt="${entry.name}">`;
+                        container.appendChild(slide);
+                    }
+                }
+            }
+        }
+
+        // 5. ENGINE DE TRANSITIONS ALÉATOIRES (VARIÉES)
+        function initialiserSwiperAnime() {
+            monSwiper = new Swiper('.swiper', {
+                loop: true,
+                effect: 'creative',
+                speed: 1200, // Vitesse de la transition (1.2s)
+                autoplay: {
+                    delay: TEMPS_AFFICHAGE,
+                    disableOnInteraction: false,
+                },
+                creativeEffect: {
+                    prev: { translate: [0, 0, 0], opacity: 0 },
+                    next: { translate: [0, 0, 0], opacity: 0 },
+                },
+                on: {
+                    // À chaque changement d'image, on change de style d'animation aléatoirement
+                    slideChange: function () {
+                        const effets = [
+                            // 1. Effet Glissement latéral avec fondu
+                            { prev: { translate: ['-100%', 0, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
+                            // 2. Effet Chute verticale
+                            { prev: { translate: [0, '-100%', 0], opacity: 0 }, next: { translate: [0, '100%', 0], opacity: 1 } },
+                            // 3. Effet Zoom arrière / Fondu (Style Windows classique)
+                            { prev: { scale: 0.8, opacity: 0 }, next: { scale: 1, opacity: 1 } },
+                            // 4. Effet Rotation 3D élégante
+                            { prev: { translate: ['-20%', 0, -500], rotate: [0, 50, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
+                            // 5. Effet Recouvrement
+                            { prev: { opacity: 0, scale: 1.2 }, next: { translate: [0, 0, 0], opacity: 1 } }
+                        ];
+                        
+                        // Sélection au hasard d'un effet dans la liste
+                        const effetAleatoire = effets[Math.floor(Math.random() * effets.length)];
+                        this.params.creativeEffect = effetAleatoire;
+                        this.update(); 
+                    }
+                }
+            });
+        }
+
+        function quitterDiaporama() {
+            document.getElementById('diaporama-wrapper').style.display = "none";
+            if (monSwiper) monSwiper.destroy(true, true);
+            if (document.fullscreenElement) document.exitFullscreen();
+            // On réaffiche l'écran au cas où ils veulent relancer manuellement
+            verifierDossierAuDemarrage();
+        }
+
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) quitterDiaporama();
+        });
+    </script>
+</body>
+</html>
