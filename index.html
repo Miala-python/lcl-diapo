@@ -239,11 +239,16 @@
             window.focus();
         }
 
+        let fichiersImages = [];
+        const urlsActives = new Map(); // index slide DOM -> ObjectURL
+
         async function chargerImagesLocales() {
             const container = document.getElementById('slides-container');
             container.innerHTML = "";
+            fichiersImages = [];
+            urlsActives.forEach(url => URL.revokeObjectURL(url));
+            urlsActives.clear();
 
-            const fichiersImages = [];
             for await (const entry of dossierHandle.values()) {
                 if (entry.kind === 'file') {
                     const file = await entry.getFile();
@@ -259,13 +264,46 @@
                 [fichiersImages[i], fichiersImages[j]] = [fichiersImages[j], fichiersImages[i]];
             }
 
-            for (const file of fichiersImages) {
-                const url = URL.createObjectURL(file);
+            // Crée les slides vides ; les images sont chargées/déchargées à la demande
+            // via mettreAJourImagesVisibles() pour éviter de tout garder en mémoire.
+            fichiersImages.forEach((file, index) => {
                 const slide = document.createElement('div');
                 slide.className = 'swiper-slide';
-                slide.innerHTML = `<img src="${url}" alt="${file.name}">`;
+                slide.dataset.fileIndex = index;
+                slide.innerHTML = `<img alt="${file.name}">`;
                 container.appendChild(slide);
+            });
+        }
+
+        // Charge les images des slides proches de l'index courant et libère les autres.
+        function mettreAJourImagesVisibles(indexCourant) {
+            if (!monSwiper) return;
+            const total = fichiersImages.length;
+            if (total === 0) return;
+
+            const MARGE = 1; // charge la slide courante + 1 avant + 1 après
+            const indicesAGarder = new Set();
+            for (let d = -MARGE; d <= MARGE; d++) {
+                indicesAGarder.add(((indexCourant + d) % total + total) % total);
             }
+
+            const slides = document.querySelectorAll('#slides-container .swiper-slide');
+            slides.forEach(slide => {
+                const idx = Number(slide.dataset.fileIndex);
+                const img = slide.querySelector('img');
+
+                if (indicesAGarder.has(idx)) {
+                    if (!urlsActives.has(idx)) {
+                        const url = URL.createObjectURL(fichiersImages[idx]);
+                        urlsActives.set(idx, url);
+                        img.src = url;
+                    }
+                } else if (urlsActives.has(idx)) {
+                    URL.revokeObjectURL(urlsActives.get(idx));
+                    urlsActives.delete(idx);
+                    img.removeAttribute('src');
+                }
+            });
         }
 
         function effetAleatoire() {
@@ -282,21 +320,43 @@
         }
 
         function initialiserSwiperAnime() {
+            const total = fichiersImages.length;
+            // loop nécessite au moins 3 slides pour un slidesPerView de 1
+            // (Swiper duplique sinon il avertit et désactive le loop).
+            const loopActif = total >= 3;
+
             monSwiper = new Swiper('.swiper', {
-                loop: true,
+                loop: loopActif,
                 effect: 'creative',
                 speed: 1200,
                 creativeEffect: effetAleatoire(),
-                autoplay: {
+                observer: true,
+                observeParents: true,
+                autoplay: total > 1 ? {
                     delay: TEMPS_AFFICHAGE,
                     disableOnInteraction: false,
-                },
+                } : false,
                 on: {
+                    init: function () {
+                        mettreAJourImagesVisibles(this.realIndex);
+                    },
                     slideChangeTransitionStart: function () {
                         // Choisit le prochain effet AVANT que la transition courante
                         // ne démarre, pour qu'il s'applique à la transition suivante.
                         this.params.creativeEffect = effetAleatoire();
+                    },
+                    slideChange: function () {
+                        mettreAJourImagesVisibles(this.realIndex);
                     }
+                }
+            });
+
+            // Recalcule la mise en page de Swiper proprement au redimensionnement
+            // de la fenêtre (au lieu de laisser le comportement par défaut buguer
+            // avec le loop + effet creative).
+            window.addEventListener('resize', () => {
+                if (monSwiper) {
+                    monSwiper.update();
                 }
             });
         }
@@ -314,6 +374,10 @@
                 monSwiper.destroy(true, true);
                 monSwiper = null;
             }
+
+            // Libère toutes les images encore en mémoire
+            urlsActives.forEach(url => URL.revokeObjectURL(url));
+            urlsActives.clear();
 
             // 3. Quitter le mode plein écran du navigateur (si actif)
             if (document.fullscreenElement) {
