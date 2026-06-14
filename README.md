@@ -1,0 +1,2 @@
+# lcl-diapo
+Local diaporama
