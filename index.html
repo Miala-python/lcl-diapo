@@ -120,8 +120,6 @@
         </div>
     </div>
 
-    <iframe id="iframe-musique" style="display:none;" allow="autoplay"></iframe>
-
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
 
     <script>
@@ -132,6 +130,7 @@
         let dossierHandle = null;
         let monSwiper = null;
         let enLecture = false;
+        let fenetreMusique = null;
 
         // Base de données IndexedDB
         const request = indexedDB.open("AutoDiapoDBV2", 1);
@@ -236,8 +235,8 @@
         }
 
         function lancerMusique() {
-            const iframe = document.getElementById('iframe-musique');
-            iframe.src = LIEN_MUSIQUE;
+            fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=480,height=320,left=100,top=100,menubar=no,status=no");
+            window.focus();
         }
 
         async function chargerImagesLocales() {
@@ -304,10 +303,9 @@
 
         // CORRECTION DIRECTE DU BOUTON QUITTER
         function quitterDiaporama() {
-            // 1. Couper la musique
-            const iframeMusique = document.getElementById('iframe-musique');
-            if (iframeMusique) {
-                iframeMusique.src = "";
+            // 1. Fermer la fenêtre de musique si elle est ouverte
+            if (fenetreMusique && !fenetreMusique.closed) {
+                fenetreMusique.close();
             }
 
             // 2. Détruire proprement le carrousel pour libérer la mémoire
