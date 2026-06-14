@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lecteur Ambiance Automatique - Fix</title>
+    <title>Lecteur Ambiance Automatique - Fix v2</title>
     
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
     
@@ -250,7 +250,7 @@
                     next: { translate: [0, 0, 0], opacity: 0 },
                 },
                 on: {
-                    slideChange: function () {
+                    slideChangeTransitionEnd: function () {
                         const effets = [
                             { prev: { translate: ['-100%', 0, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
                             { prev: { translate: [0, '-100%', 0], opacity: 0 }, next: { translate: [0, '100%', 0], opacity: 1 } },
@@ -260,7 +260,6 @@
                         ];
                         const effetChoisi = effets[Math.floor(Math.random() * effets.length)];
                         this.params.creativeEffect = effetChoisi;
-                        this.update(); 
                     }
                 }
             });
