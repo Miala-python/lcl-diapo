@@ -150,7 +150,15 @@
                     const gestionPermissions = await dossierHandle.queryPermission({ mode: 'read' });
                     
                     if (gestionPermissions === 'granted') {
-                        demarrerTout();
+                        // Le dossier est déjà autorisé, mais le plein écran et l'ouverture
+                        // de la fenêtre musique nécessitent un geste utilisateur :
+                        // on affiche un bouton de lancement plutôt que de démarrer seul.
+                        document.getElementById('setup-screen').style.display = "block";
+                        document.getElementById('setup-screen').innerHTML = `
+                            <h1>Prêt à lancer</h1>
+                            <p>Cliquez ci-dessous pour démarrer l'ambiance.</p><br>
+                            <button class="btn" onclick="demarrerTout()">🚀 Lancer</button>
+                        `;
                     } else {
                         document.getElementById('setup-screen').style.display = "block";
                         document.getElementById('setup-screen').innerHTML = `
@@ -185,27 +193,29 @@
         // SEQUENCE DE LANCEMENT REVISITÉE
         async function demarrerTout() {
             document.getElementById('setup-screen').style.display = "none";
-            
-            // 1. Charger d'abord les images pendant qu'on a le focus
-            await chargerImagesLocales();
-            
-            // 2. Afficher la zone de diapo et forcer le plein écran immédiatement
+
+            // 1. Afficher la zone de diapo et passer en plein écran IMMÉDIATEMENT,
+            //    tant qu'on est encore dans le geste utilisateur (clic).
             const wrapper = document.getElementById('diaporama-wrapper');
             wrapper.style.display = "block";
-            
-            if (wrapper.requestFullscreen) {
-                await wrapper.requestFullscreen();
+
+            try {
+                if (wrapper.requestFullscreen) {
+                    await wrapper.requestFullscreen();
+                }
+            } catch (err) {
+                console.warn("Plein écran refusé :", err);
             }
 
-            // 3. Initialiser le moteur d'animation Swiper
-            initialiserSwiperAnime();
+            // 2. Ouvrir la fenêtre musique pendant qu'on a encore le geste utilisateur.
+            fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
+            window.focus();
 
-            // 4. Lancer la musique en arrière-plan (Pop-up discret qui ne vole pas le plein écran)
-            setTimeout(() => {
-                fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
-                // On redonne immédiatement le focus à notre fenêtre principale au cas où
-                window.focus();
-            }, 500);
+            // 3. Charger les images (peut être asynchrone, fait après le reste).
+            await chargerImagesLocales();
+
+            // 4. Initialiser le moteur d'animation Swiper.
+            initialiserSwiperAnime();
         }
 
         async function chargerImagesLocales() {
@@ -248,8 +258,8 @@
                             { prev: { translate: ['-20%', 0, -500], rotate: [0, 50, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
                             { prev: { opacity: 0, scale: 1.2 }, next: { translate: [0, 0, 0], opacity: 1 } }
                         ];
-                        const高度 = effets[Math.floor(Math.random() * effets.length)];
-                        this.params.creativeEffect =高度;
+                        const effetChoisi = effets[Math.floor(Math.random() * effets.length)];
+                        this.params.creativeEffect = effetChoisi;
                         this.update(); 
                     }
                 }
