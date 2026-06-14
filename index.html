@@ -123,7 +123,7 @@
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
 
     <script>
-        const LIEN_MUSIQUE = "https://mi.42web.io/yt/www.php?list=PLS19zOYsmnkwokOUuQC0Kw0M8HAdtWVYj&title=Ori%20and%20the%20Will%20of%20the%20Wisps%20(Original%20Soundtrack)&time=1781430650&auto";
+        const LIEN_MUSIQUE = "https://mi.42web.io/yt/www.php?list=PLS19zOYsmnkwokOUuQC0Kw0M8HAdtWVYj&title=Ori%20and%20the%20Will%20of%20the%20Wisps%20(Original%20Soundtrack)&time=1781430650&auto"; 
         const TEMPS_AFFICHAGE = 5000; 
 
         let db;
@@ -150,15 +150,8 @@
                     const gestionPermissions = await dossierHandle.queryPermission({ mode: 'read' });
                     
                     if (gestionPermissions === 'granted') {
-                        // Le dossier est déjà autorisé, mais le plein écran et l'ouverture
-                        // de la fenêtre musique nécessitent un geste utilisateur :
-                        // on affiche un bouton de lancement plutôt que de démarrer seul.
-                        document.getElementById('setup-screen').style.display = "block";
-                        document.getElementById('setup-screen').innerHTML = `
-                            <h1>Prêt à lancer</h1>
-                            <p>Cliquez ci-dessous pour démarrer l'ambiance.</p><br>
-                            <button class="btn" onclick="demarrerTout()">🚀 Lancer</button>
-                        `;
+                        // Lancement automatique, sans bouton.
+                        demarrerTout();
                     } else {
                         document.getElementById('setup-screen').style.display = "block";
                         document.getElementById('setup-screen').innerHTML = `
@@ -194,8 +187,8 @@
         async function demarrerTout() {
             document.getElementById('setup-screen').style.display = "none";
 
-            // 1. Afficher la zone de diapo et passer en plein écran IMMÉDIATEMENT,
-            //    tant qu'on est encore dans le geste utilisateur (clic).
+            // 1. Afficher la zone de diapo et tenter le plein écran
+            //    (peut échouer silencieusement sans geste utilisateur, ce n'est pas bloquant).
             const wrapper = document.getElementById('diaporama-wrapper');
             wrapper.style.display = "block";
 
@@ -207,60 +200,86 @@
                 console.warn("Plein écran refusé :", err);
             }
 
-            // 2. Ouvrir la fenêtre musique pendant qu'on a encore le geste utilisateur.
+            // 2. Tenter d'ouvrir la fenêtre musique. Si le navigateur bloque le popup
+            //    (pas de geste utilisateur), proposer un bouton discret pour le faire manuellement.
+            tenterLancerMusique();
+
+            // 3. Charger les images (ordre aléatoire) puis lancer le diaporama.
+            await chargerImagesLocales();
+            initialiserSwiperAnime();
+        }
+
+        function tenterLancerMusique() {
             fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
             window.focus();
 
-            // 3. Charger les images (peut être asynchrone, fait après le reste).
-            await chargerImagesLocales();
+            const popupBloque = !fenetreMusique || fenetreMusique.closed || typeof fenetreMusique.closed === 'undefined';
 
-            // 4. Initialiser le moteur d'animation Swiper.
-            initialiserSwiperAnime();
+            if (popupBloque) {
+                afficherBoutonMusique();
+            }
+        }
+
+        function afficherBoutonMusique() {
+            // Évite les doublons
+            if (document.getElementById('btn-musique')) return;
+
+            const btn = document.createElement('button');
+            btn.id = 'btn-musique';
+            btn.className = 'btn';
+            btn.textContent = '🎵 Lancer la musique';
+            btn.style.position = 'fixed';
+            btn.style.bottom = '20px';
+            btn.style.right = '20px';
+            btn.style.zIndex = '10010';
+            btn.onclick = () => {
+                fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
+                window.focus();
+                if (fenetreMusique && !fenetreMusique.closed) {
+                    btn.remove();
+                }
+            };
+            document.body.appendChild(btn);
         }
 
         async function chargerImagesLocales() {
             const container = document.getElementById('slides-container');
             container.innerHTML = "";
 
+            const fichiersImages = [];
             for await (const entry of dossierHandle.values()) {
                 if (entry.kind === 'file') {
                     const file = await entry.getFile();
                     if (file.type.startsWith('image/')) {
-                        const url = URL.createObjectURL(file);
-                        const slide = document.createElement('div');
-                        slide.className = 'swiper-slide';
-                        slide.innerHTML = `<img src="${url}" alt="${entry.name}">`;
-                        container.appendChild(slide);
+                        fichiersImages.push(file);
                     }
                 }
+            }
+
+            // Mélange aléatoire (Fisher-Yates)
+            for (let i = fichiersImages.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [fichiersImages[i], fichiersImages[j]] = [fichiersImages[j], fichiersImages[i]];
+            }
+
+            for (const file of fichiersImages) {
+                const url = URL.createObjectURL(file);
+                const slide = document.createElement('div');
+                slide.className = 'swiper-slide';
+                slide.innerHTML = `<img src="${url}" alt="${file.name}">`;
+                container.appendChild(slide);
             }
         }
 
         function initialiserSwiperAnime() {
             monSwiper = new Swiper('.swiper', {
                 loop: true,
-                effect: 'creative',
+                effect: 'fade',
+                fadeEffect: { crossFade: true },
                 speed: 1200,
                 autoplay: {
                     delay: TEMPS_AFFICHAGE,
                     disableOnInteraction: false,
-                },
-                creativeEffect: {
-                    prev: { translate: [0, 0, 0], opacity: 0 },
-                    next: { translate: [0, 0, 0], opacity: 0 },
-                },
-                on: {
-                    slideChangeTransitionEnd: function () {
-                        const effets = [
-                            { prev: { translate: ['-100%', 0, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
-                            { prev: { translate: [0, '-100%', 0], opacity: 0 }, next: { translate: [0, '100%', 0], opacity: 1 } },
-                            { prev: { scale: 0.8, opacity: 0 }, next: { scale: 1, opacity: 1 } },
-                            { prev: { translate: ['-20%', 0, -500], rotate: [0, 50, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
-                            { prev: { opacity: 0, scale: 1.2 }, next: { translate: [0, 0, 0], opacity: 1 } }
-                        ];
-                        const effetChoisi = effets[Math.floor(Math.random() * effets.length)];
-                        this.params.creativeEffect = effetChoisi;
-                    }
                 }
             });
         }
