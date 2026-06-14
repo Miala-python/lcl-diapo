@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecteur Ambiance Automatique - Fix v2</title>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            color: #00f2fe;
+            margin-bottom: 20px;
+        }
+
+        .setup-container {
+            display: none; 
+            background: rgba(255, 255, 255, 0.05);
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 10;
+        }
+
+        .btn {
+            padding: 15px 35px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #4e54c8, #8f94fb);
+            transition: transform 0.2s;
+        }
+
+        .btn:hover { transform: scale(1.05); }
+
+        /* --- ZONE DIAPORAMA --- */
+        #diaporama-wrapper {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            z-index: 9999;
+        }
+
+        .swiper { width: 100%; height: 100%; }
+        .swiper-slide {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .swiper-slide img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            transition: transform 4s ease-out; 
+        }
+
+        .swiper-slide-active img {
+            transform: scale(1.08);
+        }
+
+        .btn-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            z-index: 10010;
+        }
+        .btn-close:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="setup-container" id="setup-screen">
+        <h1>Bienvenue</h1>
+        <p>Pour commencer, veuillez sélectionner le dossier contenant vos images.</p>
+        <p>Les prochaines fois, le diaporama et la musique se lanceront automatiquement.</p>
+        <br>
+        <button class="btn" onclick="choisirDossier()">📂 Sélectionner le Dossier</button>
+    </div>
+
+    <div id="diaporama-wrapper">
+        <button class="btn-close" onclick="quitterDiaporama()">✖ Quitter (Échap)</button>
+        <div class="swiper">
+            <div class="swiper-wrapper" id="slides-container"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+
+    <script>
+        const LIEN_MUSIQUE = "https://mi.42web.io/yt/www.php?list=PLS19zOYsmnkwokOUuQC0Kw0M8HAdtWVYj&title=Ori%20and%20the%20Will%20of%20the%20Wisps%20(Original%20Soundtrack)&time=1781430650&auto"; 
+        const TEMPS_AFFICHAGE = 5000; 
+
+        let db;
+        let dossierHandle = null;
+        let monSwiper = null;
+        let fenetreMusique = null;
+
+        // Base de données IndexedDB
+        const request = indexedDB.open("AutoDiapoDBV2", 1);
+        request.onupgradeneeded = (e) => e.target.result.createObjectStore("handles");
+        request.onsuccess = (e) => {
+            db = e.target.result;
+            verifierDossierAuDemarrage();
+        };
+
+        async function verifierDossierAuDemarrage() {
+            const tx = db.transaction("handles", "readonly");
+            const store = tx.objectStore("handles");
+            const req = store.get("dossierImages");
+            
+            req.onsuccess = async () => {
+                if (req.result) {
+                    dossierHandle = req.result;
+                    const gestionPermissions = await dossierHandle.queryPermission({ mode: 'read' });
+                    
+                    if (gestionPermissions === 'granted') {
+                        // Lancement automatique, sans bouton.
+                        demarrerTout();
+                    } else {
+                        document.getElementById('setup-screen').style.display = "block";
+                        document.getElementById('setup-screen').innerHTML = `
+                            <h1>Prêt à lancer</h1>
+                            <p>Cliquez ci-dessous pour autoriser l'accès et lancer l'ambiance.</p><br>
+                            <button class="btn" onclick="demanderPermissionEtLancer()">🚀 Autoriser & Lancer</button>
+                        `;
+                    }
+                } else {
+                    document.getElementById('setup-screen').style.display = "block";
+                }
+            };
+        }
+
+        async function demanderPermissionEtLancer() {
+            if (await dossierHandle.requestPermission({ mode: 'read' }) === 'granted') {
+                demarrerTout();
+            }
+        }
+
+        async function choisirDossier() {
+            try {
+                dossierHandle = await window.showDirectoryPicker();
+                const tx = db.transaction("handles", "readwrite");
+                tx.objectStore("handles").put(dossierHandle, "dossierImages");
+                demarrerTout();
+            } catch (err) {
+                console.error("Sélection annulée", err);
+            }
+        }
+
+        // SEQUENCE DE LANCEMENT REVISITÉE
+        async function demarrerTout() {
+            document.getElementById('setup-screen').style.display = "none";
+
+            // 1. Afficher la zone de diapo et tenter le plein écran
+            //    (peut échouer silencieusement sans geste utilisateur, ce n'est pas bloquant).
+            const wrapper = document.getElementById('diaporama-wrapper');
+            wrapper.style.display = "block";
+
+            try {
+                if (wrapper.requestFullscreen) {
+                    await wrapper.requestFullscreen();
+                }
+            } catch (err) {
+                console.warn("Plein écran refusé :", err);
+            }
+
+            // 2. Tenter d'ouvrir la fenêtre musique. Si le navigateur bloque le popup
+            //    (pas de geste utilisateur), proposer un bouton discret pour le faire manuellement.
+            tenterLancerMusique();
+
+            // 3. Charger les images (ordre aléatoire) puis lancer le diaporama.
+            await chargerImagesLocales();
+            initialiserSwiperAnime();
+        }
+
+        function tenterLancerMusique() {
+            fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
+            window.focus();
+
+            const popupBloque = !fenetreMusique || fenetreMusique.closed || typeof fenetreMusique.closed === 'undefined';
+
+            if (popupBloque) {
+                afficherBoutonMusique();
+            }
+        }
+
+        function afficherBoutonMusique() {
+            // Évite les doublons
+            if (document.getElementById('btn-musique')) return;
+
+            const btn = document.createElement('button');
+            btn.id = 'btn-musique';
+            btn.className = 'btn';
+            btn.textContent = '🎵 Lancer la musique';
+            btn.style.position = 'fixed';
+            btn.style.bottom = '20px';
+            btn.style.right = '20px';
+            btn.style.zIndex = '10010';
+            btn.onclick = () => {
+                fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
+                window.focus();
+                if (fenetreMusique && !fenetreMusique.closed) {
+                    btn.remove();
+                }
+            };
+            document.body.appendChild(btn);
+        }
+
+        async function chargerImagesLocales() {
+            const container = document.getElementById('slides-container');
+            container.innerHTML = "";
+
+            const fichiersImages = [];
+            for await (const entry of dossierHandle.values()) {
+                if (entry.kind === 'file') {
+                    const file = await entry.getFile();
+                    if (file.type.startsWith('image/')) {
+                        fichiersImages.push(file);
+                    }
+                }
+            }
+
+            // Mélange aléatoire (Fisher-Yates)
+            for (let i = fichiersImages.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [fichiersImages[i], fichiersImages[j]] = [fichiersImages[j], fichiersImages[i]];
+            }
+
+            for (const file of fichiersImages) {
+                const url = URL.createObjectURL(file);
+                const slide = document.createElement('div');
+                slide.className = 'swiper-slide';
+                slide.innerHTML = `<img src="${url}" alt="${file.name}">`;
+                container.appendChild(slide);
+            }
+        }
+
+        function initialiserSwiperAnime() {
+            monSwiper = new Swiper('.swiper', {
+                loop: true,
+                effect: 'fade',
+                fadeEffect: { crossFade: true },
+                speed: 1200,
+                autoplay: {
+                    delay: TEMPS_AFFICHAGE,
+                    disableOnInteraction: false,
+                }
+            });
+        }
+
+        // CORRECTION DIRECTE DU BOUTON QUITTER
+        function quitterDiaporama() {
+            // 1. Fermer la fenêtre de musique si elle est ouverte
+            if (fenetreMusique && !fenetreMusique.closed) {
+                fenetreMusique.close();
+            }
+
+            // 2. Détruire proprement le carrousel pour libérer la mémoire
+            if (monSwiper) {
+                monSwiper.autoplay.stop();
+                monSwiper.destroy(true, true);
+                monSwiper = null;
+            }
+
+            // 3. Quitter le mode plein écran du navigateur
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(err => console.log(err));
+            }
+
+            // 4. Cacher le conteneur du diaporama
+            document.getElementById('diaporama-wrapper').style.display = "none";
+            
+            // 5. Retour à l'état initial
+            verifierDossierAuDemarrage();
+        }
+
+        // Capture la sortie de plein écran (touche Échap du clavier)
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                quitterDiaporama();
+            }
+        });
+    </script>
+</body>
+</html>
