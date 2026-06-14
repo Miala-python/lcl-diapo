@@ -120,6 +120,8 @@
         </div>
     </div>
 
+    <iframe id="iframe-musique" style="display:none;" allow="autoplay"></iframe>
+
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
 
     <script>
@@ -129,7 +131,7 @@
         let db;
         let dossierHandle = null;
         let monSwiper = null;
-        let fenetreMusique = null;
+        let enLecture = false;
 
         // Base de données IndexedDB
         const request = indexedDB.open("AutoDiapoDBV2", 1);
@@ -186,9 +188,10 @@
         // SEQUENCE DE LANCEMENT REVISITÉE
         async function demarrerTout() {
             document.getElementById('setup-screen').style.display = "none";
+            enLecture = true;
 
-            // 1. Afficher la zone de diapo et tenter le plein écran
-            //    (peut échouer silencieusement sans geste utilisateur, ce n'est pas bloquant).
+            // 1. Afficher la zone de diapo (déjà en 100vw/100vh, donc visuellement
+            //    "plein écran" même si l'API Fullscreen est refusée par le navigateur).
             const wrapper = document.getElementById('diaporama-wrapper');
             wrapper.style.display = "block";
 
@@ -197,49 +200,44 @@
                     await wrapper.requestFullscreen();
                 }
             } catch (err) {
-                console.warn("Plein écran refusé :", err);
+                console.warn("Plein écran API refusé (normal sans geste utilisateur) :", err);
+                // Propose un clic pour activer le vrai plein écran du navigateur.
+                afficherBoutonPleinEcran(wrapper);
             }
 
-            // 2. Tenter d'ouvrir la fenêtre musique. Si le navigateur bloque le popup
-            //    (pas de geste utilisateur), proposer un bouton discret pour le faire manuellement.
-            tenterLancerMusique();
+            // 2. Lancer la musique en arrière-plan via iframe caché (pas de popup).
+            lancerMusique();
 
             // 3. Charger les images (ordre aléatoire) puis lancer le diaporama.
             await chargerImagesLocales();
             initialiserSwiperAnime();
         }
 
-        function tenterLancerMusique() {
-            fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
-            window.focus();
-
-            const popupBloque = !fenetreMusique || fenetreMusique.closed || typeof fenetreMusique.closed === 'undefined';
-
-            if (popupBloque) {
-                afficherBoutonMusique();
-            }
-        }
-
-        function afficherBoutonMusique() {
-            // Évite les doublons
-            if (document.getElementById('btn-musique')) return;
+        function afficherBoutonPleinEcran(wrapper) {
+            if (document.getElementById('btn-pleinecran')) return;
 
             const btn = document.createElement('button');
-            btn.id = 'btn-musique';
+            btn.id = 'btn-pleinecran';
             btn.className = 'btn';
-            btn.textContent = '🎵 Lancer la musique';
+            btn.textContent = '⛶ Plein écran';
             btn.style.position = 'fixed';
             btn.style.bottom = '20px';
-            btn.style.right = '20px';
+            btn.style.left = '20px';
             btn.style.zIndex = '10010';
-            btn.onclick = () => {
-                fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
-                window.focus();
-                if (fenetreMusique && !fenetreMusique.closed) {
+            btn.onclick = async () => {
+                try {
+                    await wrapper.requestFullscreen();
                     btn.remove();
+                } catch (err) {
+                    console.warn("Plein écran toujours refusé :", err);
                 }
             };
             document.body.appendChild(btn);
+        }
+
+        function lancerMusique() {
+            const iframe = document.getElementById('iframe-musique');
+            iframe.src = LIEN_MUSIQUE;
         }
 
         async function chargerImagesLocales() {
@@ -271,24 +269,45 @@
             }
         }
 
+        function effetAleatoire() {
+            const effets = [
+                { prev: { translate: ['-120%', 0, 0], opacity: 0 }, next: { translate: ['120%', 0, 0], opacity: 1 } },
+                { prev: { translate: [0, '-120%', 0], opacity: 0 }, next: { translate: [0, '120%', 0], opacity: 1 } },
+                { prev: { scale: 0.7, opacity: 0 }, next: { scale: 1, opacity: 1 } },
+                { prev: { translate: ['-20%', 0, -500], rotate: [0, 50, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
+                { prev: { opacity: 0, scale: 1.3 }, next: { translate: [0, 0, 0], opacity: 1 } },
+                { prev: { translate: [0, 0, -800], opacity: 0 }, next: { translate: [0, 0, 0], opacity: 1 } },
+                { prev: { translate: ['100%', 0, 0], opacity: 0 }, next: { translate: ['-100%', 0, 0], opacity: 1 } }
+            ];
+            return effets[Math.floor(Math.random() * effets.length)];
+        }
+
         function initialiserSwiperAnime() {
             monSwiper = new Swiper('.swiper', {
                 loop: true,
-                effect: 'fade',
-                fadeEffect: { crossFade: true },
+                effect: 'creative',
                 speed: 1200,
+                creativeEffect: effetAleatoire(),
                 autoplay: {
                     delay: TEMPS_AFFICHAGE,
                     disableOnInteraction: false,
+                },
+                on: {
+                    slideChangeTransitionStart: function () {
+                        // Choisit le prochain effet AVANT que la transition courante
+                        // ne démarre, pour qu'il s'applique à la transition suivante.
+                        this.params.creativeEffect = effetAleatoire();
+                    }
                 }
             });
         }
 
         // CORRECTION DIRECTE DU BOUTON QUITTER
         function quitterDiaporama() {
-            // 1. Fermer la fenêtre de musique si elle est ouverte
-            if (fenetreMusique && !fenetreMusique.closed) {
-                fenetreMusique.close();
+            // 1. Couper la musique
+            const iframeMusique = document.getElementById('iframe-musique');
+            if (iframeMusique) {
+                iframeMusique.src = "";
             }
 
             // 2. Détruire proprement le carrousel pour libérer la mémoire
@@ -298,21 +317,27 @@
                 monSwiper = null;
             }
 
-            // 3. Quitter le mode plein écran du navigateur
+            // 3. Quitter le mode plein écran du navigateur (si actif)
             if (document.fullscreenElement) {
                 document.exitFullscreen().catch(err => console.log(err));
             }
 
             // 4. Cacher le conteneur du diaporama
             document.getElementById('diaporama-wrapper').style.display = "none";
+
+            // Retirer les boutons flottants éventuels
+            const btnFs = document.getElementById('btn-pleinecran');
+            if (btnFs) btnFs.remove();
             
             // 5. Retour à l'état initial
+            enLecture = false;
             verifierDossierAuDemarrage();
         }
 
-        // Capture la sortie de plein écran (touche Échap du clavier)
+        // Capture la sortie de plein écran (touche Échap du clavier),
+        // mais uniquement si le diaporama est effectivement en cours.
         document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement) {
+            if (!document.fullscreenElement && enLecture) {
                 quitterDiaporama();
             }
         });
