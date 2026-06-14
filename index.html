@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lecteur Ambiance Automatique</title>
+    <title>Lecteur Ambiance Automatique - Fix</title>
     
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
     
@@ -28,13 +28,14 @@
         }
 
         .setup-container {
-            display: none; /* Masqué si le mode automatique s'active */
+            display: none; 
             background: rgba(255, 255, 255, 0.05);
             padding: 40px;
             border-radius: 16px;
             text-align: center;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
             border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 10;
         }
 
         .btn {
@@ -76,10 +77,9 @@
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
-            transition: transform 4s ease-out; /* Pour l'effet de zoom progressif */
+            transition: transform 4s ease-out; 
         }
 
-        /* Effet Ken Burns (zoom lent) quand la slide devient active */
         .swiper-slide-active img {
             transform: scale(1.08);
         }
@@ -88,13 +88,18 @@
             position: absolute;
             top: 20px;
             right: 20px;
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.3);
             color: white;
             border: none;
-            padding: 10px 20px;
+            padding: 12px 24px;
             border-radius: 5px;
+            font-weight: bold;
+            font-size: 1rem;
             cursor: pointer;
-            z-index: 10005;
+            z-index: 10010;
+        }
+        .btn-close:hover {
+            background: rgba(255, 255, 255, 0.5);
         }
     </style>
 </head>
@@ -109,7 +114,7 @@
     </div>
 
     <div id="diaporama-wrapper">
-        <button class="btn-close" onclick="quitterDiaporama()">✖ Quitter</button>
+        <button class="btn-close" onclick="quitterDiaporama()">✖ Quitter (Échap)</button>
         <div class="swiper">
             <div class="swiper-wrapper" id="slides-container"></div>
         </div>
@@ -118,23 +123,22 @@
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
 
     <script>
-        // --- CONFIGURATION ---
-        const LIEN_MUSIQUE = "https://mi.42web.io/yt/www.php?list=PLS19zOYsmnkwokOUuQC0Kw0M8HAdtWVYj&title=Ori%20and%20the%20Will%20of%20the%20Wisps%20(Original%20Soundtrack)&time=1781430650&auto"; // Change par ton lien de musique (Playlist, Spotify, etc.)
-        const TEMPS_AFFICHAGE = 5000; // Temps d'affichage par image (5 secondes)
+        const LIEN_MUSIQUE = "https://mi.42web.io/yt/www.php?list=PLS19zOYsmnkwokOUuQC0Kw0M8HAdtWVYj&title=Ori%20and%20the%20Will%20of%20the%20Wisps%20(Original%20Soundtrack)&time=1781430650&auto"; 
+        const TEMPS_AFFICHAGE = 5000; 
 
         let db;
         let dossierHandle = null;
         let monSwiper = null;
+        let fenetreMusique = null;
 
-        // Base de données pour retenir le dossier
-        const request = indexedDB.open("AutoDiapoDB", 1);
+        // Base de données IndexedDB
+        const request = indexedDB.open("AutoDiapoDBV2", 1);
         request.onupgradeneeded = (e) => e.target.result.createObjectStore("handles");
         request.onsuccess = (e) => {
             db = e.target.result;
             verifierDossierAuDemarrage();
         };
 
-        // 1. DÉMARRAGE AUTOMATIQUE
         async function verifierDossierAuDemarrage() {
             const tx = db.transaction("handles", "readonly");
             const store = tx.objectStore("handles");
@@ -143,13 +147,11 @@
             req.onsuccess = async () => {
                 if (req.result) {
                     dossierHandle = req.result;
-                    // L'utilisateur doit juste accepter le pop-up de sécurité du navigateur
                     const gestionPermissions = await dossierHandle.queryPermission({ mode: 'read' });
                     
                     if (gestionPermissions === 'granted') {
                         demarrerTout();
                     } else {
-                        // Si la permission a expiré (fermeture du navigateur), on lui demande un clic pour ré-autoriser
                         document.getElementById('setup-screen').style.display = "block";
                         document.getElementById('setup-screen').innerHTML = `
                             <h1>Prêt à lancer</h1>
@@ -158,7 +160,6 @@
                         `;
                     }
                 } else {
-                    // Premier démarrage absolu : on montre l'écran de sélection
                     document.getElementById('setup-screen').style.display = "block";
                 }
             };
@@ -170,7 +171,6 @@
             }
         }
 
-        // 2. PREMIER CHOIX DU DOSSIER
         async function choisirDossier() {
             try {
                 dossierHandle = await window.showDirectoryPicker();
@@ -178,30 +178,36 @@
                 tx.objectStore("handles").put(dossierHandle, "dossierImages");
                 demarrerTout();
             } catch (err) {
-                console.log("Sélection annulée", err);
+                console.error("Sélection annulée", err);
             }
         }
 
-        // 3. ACTION DE LANCEMENT (MUSIQUE + DIAPO)
+        // SEQUENCE DE LANCEMENT REVISITÉE
         async function demarrerTout() {
-            // Masque l'écran d'accueil
             document.getElementById('setup-screen').style.display = "none";
             
-            // A. Lance la musique en arrière-plan (ouvre un nouvel onglet)
-            window.open(LIEN_MUSIQUE, "_blank");
-
-            // B. Génère le diaporama
+            // 1. Charger d'abord les images pendant qu'on a le focus
             await chargerImagesLocales();
             
-            // C. Affiche et passe en plein écran
+            // 2. Afficher la zone de diapo et forcer le plein écran immédiatement
             const wrapper = document.getElementById('diaporama-wrapper');
             wrapper.style.display = "block";
-            if (wrapper.requestFullscreen) wrapper.requestFullscreen();
+            
+            if (wrapper.requestFullscreen) {
+                await wrapper.requestFullscreen();
+            }
 
+            // 3. Initialiser le moteur d'animation Swiper
             initialiserSwiperAnime();
+
+            // 4. Lancer la musique en arrière-plan (Pop-up discret qui ne vole pas le plein écran)
+            setTimeout(() => {
+                fenetreMusique = window.open(LIEN_MUSIQUE, "MusiqueAmbiance", "width=400,height=300,top=1000,left=1000,menubar=no,status=no");
+                // On redonne immédiatement le focus à notre fenêtre principale au cas où
+                window.focus();
+            }, 500);
         }
 
-        // 4. LECTURE DES IMAGES
         async function chargerImagesLocales() {
             const container = document.getElementById('slides-container');
             container.innerHTML = "";
@@ -220,12 +226,11 @@
             }
         }
 
-        // 5. ENGINE DE TRANSITIONS ALÉATOIRES (VARIÉES)
         function initialiserSwiperAnime() {
             monSwiper = new Swiper('.swiper', {
                 loop: true,
                 effect: 'creative',
-                speed: 1200, // Vitesse de la transition (1.2s)
+                speed: 1200,
                 autoplay: {
                     delay: TEMPS_AFFICHAGE,
                     disableOnInteraction: false,
@@ -235,40 +240,53 @@
                     next: { translate: [0, 0, 0], opacity: 0 },
                 },
                 on: {
-                    // À chaque changement d'image, on change de style d'animation aléatoirement
                     slideChange: function () {
                         const effets = [
-                            // 1. Effet Glissement latéral avec fondu
                             { prev: { translate: ['-100%', 0, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
-                            // 2. Effet Chute verticale
                             { prev: { translate: [0, '-100%', 0], opacity: 0 }, next: { translate: [0, '100%', 0], opacity: 1 } },
-                            // 3. Effet Zoom arrière / Fondu (Style Windows classique)
                             { prev: { scale: 0.8, opacity: 0 }, next: { scale: 1, opacity: 1 } },
-                            // 4. Effet Rotation 3D élégante
                             { prev: { translate: ['-20%', 0, -500], rotate: [0, 50, 0], opacity: 0 }, next: { translate: ['100%', 0, 0], opacity: 1 } },
-                            // 5. Effet Recouvrement
                             { prev: { opacity: 0, scale: 1.2 }, next: { translate: [0, 0, 0], opacity: 1 } }
                         ];
-                        
-                        // Sélection au hasard d'un effet dans la liste
-                        const effetAleatoire = effets[Math.floor(Math.random() * effets.length)];
-                        this.params.creativeEffect = effetAleatoire;
+                        const高度 = effets[Math.floor(Math.random() * effets.length)];
+                        this.params.creativeEffect =高度;
                         this.update(); 
                     }
                 }
             });
         }
 
+        // CORRECTION DIRECTE DU BOUTON QUITTER
         function quitterDiaporama() {
+            // 1. Fermer la fenêtre de musique si elle est ouverte
+            if (fenetreMusique && !fenetreMusique.closed) {
+                fenetreMusique.close();
+            }
+
+            // 2. Détruire proprement le carrousel pour libérer la mémoire
+            if (monSwiper) {
+                monSwiper.autoplay.stop();
+                monSwiper.destroy(true, true);
+                monSwiper = null;
+            }
+
+            // 3. Quitter le mode plein écran du navigateur
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(err => console.log(err));
+            }
+
+            // 4. Cacher le conteneur du diaporama
             document.getElementById('diaporama-wrapper').style.display = "none";
-            if (monSwiper) monSwiper.destroy(true, true);
-            if (document.fullscreenElement) document.exitFullscreen();
-            // On réaffiche l'écran au cas où ils veulent relancer manuellement
+            
+            // 5. Retour à l'état initial
             verifierDossierAuDemarrage();
         }
 
+        // Capture la sortie de plein écran (touche Échap du clavier)
         document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement) quitterDiaporama();
+            if (!document.fullscreenElement) {
+                quitterDiaporama();
+            }
         });
     </script>
 </body>
